@@ -1,0 +1,86 @@
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: harbor-secret
+  annotations:
+    tekton.dev/docker-0: https://harbor.cbs.hasops.com/
+type: kubernetes.io/basic-auth
+stringData:
+    username: robot$robot
+    password: 
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-secret
+  annotations:
+    tekton.dev/git-0: github.com
+type: kubernetes.io/ssh-auth
+data:
+  ssh-privatekey: 
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: build-bot
+secrets:
+  - name: harbor-secret
+  - name: github-secret
+---
+apiVersion: tekton.dev/v1alpha1
+kind: PipelineResource
+metadata:
+  name: daosie-tekton-examples
+spec:
+  type: git
+  params:
+    - name: url
+      value: https://github.com/DaOsie/tekton-examples
+    - name: revision
+      value: main
+---
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: clone-repo
+spec:
+  resources:
+    inputs:
+      - name: repo
+        type: git
+  steps:
+    - name: list-repo
+      image: golang:1.14-alpine
+      workingDir: /workspace/repo/
+      script: ls -alh 
+    - name: run-go-tests
+      image: golang:1.14-alpine
+      workingDir: /workspace/repo/
+      command: ["go"]
+      args: ["test"]
+    - name: build-and-push
+      image: gcr.io/kaniko-project/executor:v0.19.0
+      env:
+        - name: DOCKER_CONFIG
+          value: /tekton/home/.docker
+      command:
+        - /kaniko/executor
+        - --dockerfile=Dockerfile
+        - --context=/workspace/repo
+        - --destination=harbor.cbs.hasops.com/demo/tekton-test:latest
+---
+apiVersion: tekton.dev/v1beta1
+kind: TaskRun
+metadata:
+  name: testrun-15
+spec:
+  serviceAccountName: build-bot
+  taskRef:
+    name: clone-repo
+  resources:
+    inputs:
+      - name: repo
+        resourceRef:
+          name: daosie-tekton-examples
+
